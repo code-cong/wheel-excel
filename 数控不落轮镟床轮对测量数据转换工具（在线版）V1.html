@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UGL型数控不落轮镟床轮对测量数据转换工具</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: "Microsoft YaHei", Consolas, sans-serif;
+        }
+        body {
+            padding: 20px;
+            max-width: 1000px;
+            margin: 0 auto;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 25px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            font-size: 18px;
+            text-align: center;
+            margin-bottom: 10px;
+            color: #333;
+        }
+        h2 {
+            font-size: 12px;
+            text-align: center;
+            color: #666;
+            margin-bottom: 20px;
+        }
+        .file-section {
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        .btn-group {
+            margin-bottom: 10px;
+            display: flex;
+            gap: 10px;
+        }
+        button {
+            padding: 8px 16px;
+            background: #0078d7;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        button.clear {
+            background: #6c757d;
+        }
+        button.convert {
+            background: #28a745;
+        }
+        .file-count {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 10px;
+        }
+        .file-list {
+            width: 100%;
+            height: 100px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 8px;
+            overflow-y: auto;
+            font-size: 12px;
+        }
+        .progress-bar {
+            height: 6px;
+            background: #eee;
+            border-radius: 3px;
+            margin: 10px 0;
+            overflow: hidden;
+            display: none;
+        }
+        .progress-bar.active {
+            display: block;
+        }
+        .progress-bar .progress {
+            height: 100%;
+            background: #0078d7;
+            width: 0;
+            animation: progress 1s infinite linear;
+        }
+        @keyframes progress {
+            0% { width: 0; }
+            100% { width: 100%; }
+        }
+        .log-section {
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 15px;
+        }
+        .log-section h3 {
+            font-size: 14px;
+            margin-bottom: 10px;
+            color: #333;
+        }
+        .log-content {
+            width: 100%;
+            height: 200px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 8px;
+            overflow-y: auto;
+            font-family: Consolas;
+            font-size: 12px;
+            white-space: pre-wrap;
+        }
+        input[type="file"] {
+            display: none;
+        }
+        .file-label {
+            padding: 8px 16px;
+            background: #0078d7;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            display: inline-block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>UGL型数控不落轮镟床轮对测量数据转换工具</h1>
+        <h2>批量导入CSV → 自动生成标准Excel记录表</h2>
+
+        <div class="file-section">
+            <div class="btn-group">
+                <label class="file-label" for="file-input">选择CSV文件</label>
+                <input type="file" id="file-input" accept=".csv,.CSV" multiple />
+                <button class="clear" id="clear-btn">清空列表</button>
+                <button class="convert" id="convert-btn">开始转换</button>
+            </div>
+            <div class="file-count" id="file-count">已选择：0 个文件</div>
+            <div class="file-list" id="file-list"></div>
+            
+            <div class="progress-bar" id="progress-bar">
+                <div class="progress"></div>
+            </div>
+        </div>
+
+        <div class="log-section">
+            <h3>运行日志</h3>
+            <div class="log-content" id="log-content"></div>
+        </div>
+    </div>
+
+    <!-- 修复：使用官方可用的xlsx-js-style CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+
+    <script>
+        const csvFiles = [];
+        const fileListEl = document.getElementById('file-list');
+        const fileCountEl = document.getElementById('file-count');
+        const fileInputEl = document.getElementById('file-input');
+        const clearBtnEl = document.getElementById('clear-btn');
+        const convertBtnEl = document.getElementById('convert-btn');
+        const progressBarEl = document.getElementById('progress-bar');
+        const logContentEl = document.getElementById('log-content');
+
+        const MAPPING = {
+            'LN_006': '车厢号码',
+            'LN_009': '车辆ID', 
+            'LN_013': '轮对ID', 
+            'LN_019': '轮对内侧距',
+            'LN_021': '左车轮直径', 
+            'LN_022': '右车轮直径',
+            'LN_026': '左车轮Sd', 
+            'LN_027': '右车轮Sd',
+            'LN_029': '左车轮Sh', 
+            'LN_030': '右车轮Sh',
+            'LN_035': '左车轮径向跳动', 
+            'LN_036': '右车轮径向跳动',
+            'LN_037': '左车轮轴向跳动', 
+            'LN_038': '右车轮轴向跳动',
+            'LN_032': '左车轮Qr', 
+            'LN_033': '右车轮Qr'
+        };
+
+        function createFixedFormatTemplate() {
+            const excelData = Array(33).fill().map(() => Array(10).fill(''));
+            excelData[0] = ['轮对测量数据记录表', '', '', '', '', '', '', '', '', ''];
+            excelData[1] = ['车号', '参数', '1轴', '1轴', '2轴', '2轴', '3轴', '3轴', '4轴', '4轴'];
+            excelData[2] = ['车厢号', '', '1轮', '2轮', '3轮', '4轮', '5轮', '6轮', '7轮', '8轮'];
+            excelData[3] = [1, '踏面直径（mm）', '', '', '', '', '', '', '', ''];
+            excelData[4] = ['', '轮缘厚度（mm）', '', '', '', '', '', '', '', ''];
+            excelData[5] = ['', '轮缘高度（mm）', '', '', '', '', '', '', '', ''];
+            excelData[6] = ['', '轮对内侧距（mm）', '', '', '', '', '', '', '', ''];
+            excelData[7] = ['', '径向圆跳动（mm）', '', '', '', '', '', '', '', ''];
+            excelData[8] = ['', '轴向圆跳动（mm）', '', '', '', '', '', '', '', ''];
+            excelData[9] = ['', 'QR值（mm）', '', '', '', '', '', '', '', ''];
+            excelData[10] = [2, '踏面直径（mm）', '', '', '', '', '', '', '', ''];
+            excelData[11] = ['', '轮缘厚度（mm）', '', '', '', '', '', '', '', ''];
+            excelData[12] = ['', '轮缘高度（mm）', '', '', '', '', '', '', '', ''];
+            excelData[13] = ['', '轮对内侧距（mm）', '', '', '', '', '', '', '', ''];
+            excelData[14] = ['', '径向圆跳动（mm）', '', '', '', '', '', '', '', ''];
+            excelData[15] = ['', '轴向圆跳动（mm）', '', '', '', '', '', '', '', ''];
+            excelData[16] = ['', 'QR值（mm）', '', '', '', '', '', '', '', ''];
+            excelData[17] = ['车号', '参数', '4轴', '4轴', '3轴', '3轴', '2轴', '2轴', '1轴', '1轴'];
+            excelData[18] = ['车厢号', '', '8轮', '7轮', '6轮', '5轮', '4轮', '3轮', '2轮', '1轮'];
+            excelData[19] = [3, '踏面直径（mm）', '', '', '', '', '', '', '', ''];
+            excelData[20] = ['', '轮缘厚度（mm）', '', '', '', '', '', '', '', ''];
+            excelData[21] = ['', '轮缘高度（mm）', '', '', '', '', '', '', '', ''];
+            excelData[22] = ['', '轮对内侧距（mm）', '', '', '', '', '', '', '', ''];
+            excelData[23] = ['', '径向圆跳动（mm）', '', '', '', '', '', '', '', ''];
+            excelData[24] = ['', '轴向圆跳动（mm）', '', '', '', '', '', '', '', ''];
+            excelData[25] = ['', 'QR值（mm）', '', '', '', '', '', '', '', ''];
+            excelData[26] = [4, '踏面直径（mm）', '', '', '', '', '', '', '', ''];
+            excelData[27] = ['', '轮缘厚度（mm）', '', '', '', '', '', '', '', ''];
+            excelData[28] = ['', '轮缘高度（mm）', '', '', '', '', '', '', '', ''];
+            excelData[29] = ['', '轮对内侧距（mm）', '', '', '', '', '', '', '', ''];
+            excelData[30] = ['', '径向圆跳动（mm）', '', '', '', '', '', '', '', ''];
+            excelData[31] = ['', '轴向圆跳动（mm）', '', '', '', '', '', '', '', ''];
+            excelData[32] = ['', 'QR值（mm）', '', '', '', '', '', '', '', ''];
+            return excelData;
+        }
+
+        // 修复：兼容UTF-8/GBK双编码CSV解析
+        function parseCsvFile(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = e => {
+                    try {
+                        let content = '';
+                        // 先尝试UTF-8，失败则用GBK
+                        try {
+                            content = new TextDecoder('utf-8').decode(new Uint8Array(e.target.result));
+                        } catch (err) {
+                            content = new TextDecoder('gbk', {fatal: false}).decode(new Uint8Array(e.target.result));
+                        }
+                        // 解析CSV，处理空行和无效行
+                        const results = Papa.parse(content, { 
+                            delimiter: ';', 
+                            header: false, 
+                            skipEmptyLines: true,
+                            errorOnEmptyLine: false
+                        });
+                        const dataDict = {};
+                        results.data.forEach(row => {
+                            if (row.length < 3) return;
+                            const lc = row[0]?.trim();
+                            const value = row[2]?.trim() || '';
+                            if (lc && MAPPING[lc]) dataDict[MAPPING[lc]] = value;
+                        });
+                        if (!dataDict['车辆ID'] || !dataDict['轮对ID']) {
+                            reject(new Error("缺少车辆ID/轮对ID"));
+                            return;
+                        }
+                        resolve(dataDict);
+                    } catch (err) { 
+                        reject(new Error(`解析失败：${err.message}`)); 
+                    }
+                };
+                reader.onerror = () => reject(new Error("文件读取失败"));
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        function getExcelPosition(carId, wheelPairId) {
+            try {
+                const carNum = parseInt(carId);
+                const carRowMap = {1:3, 2:10, 3:19, 4:26};
+                const [L, R] = wheelPairId.split('-').map(Number);
+                let colL, colR;
+                if (carNum === 1 || carNum === 2) { colL = L+1; colR = R+1; } 
+                else if (carNum ===3 || carNum ===4) { colL = 9-L+1; colR = 9-R+1; }
+                else { reject(new Error("车辆ID仅支持1-4")); }
+                return { row: carRowMap[carNum], colL, colR };
+            } catch (err) {
+                throw new Error(`定位失败：${err.message}`);
+            }
+        }
+
+        function logMessage(msg) {
+            const now = new Date().toLocaleTimeString();
+            logContentEl.textContent += `[${now}] ${msg}\n`;
+            logContentEl.scrollTop = logContentEl.scrollHeight;
+        }
+
+        function updateFileList() {
+            fileListEl.innerHTML = '';
+            csvFiles.forEach(f => {
+                const d = document.createElement('div');
+                d.textContent = f.name;
+                fileListEl.appendChild(d);
+            });
+            fileCountEl.textContent = `已选择：${csvFiles.length} 个文件`;
+        }
+
+        async function convertFiles() {
+            const data = createFixedFormatTemplate();
+            let ok = 0, errCount = 0;
+            const cars = new Set();
+
+            for (const f of csvFiles) {
+                try {
+                    const d = await parseCsvFile(f);
+                    if (d['车厢号码']) cars.add(d['车厢号码']);
+                    const pos = getExcelPosition(d['车辆ID'], d['轮对ID']);
+                    const r = pos.row;
+                    const cL = pos.colL;
+                    const cR = pos.colR;
+
+                    // 填充数据，保持和Python版本一致
+                    data[r][cL] = d['左车轮直径'];      data[r][cR] = d['右车轮直径'];
+                    data[r+1][cL] = d['左车轮Sd'];      data[r+1][cR] = d['右车轮Sd'];
+                    data[r+2][cL] = d['左车轮Sh'];      data[r+2][cR] = d['右车轮Sh'];
+                    data[r+3][cL] = d['轮对内侧距'];    data[r+3][cR] = d['轮对内侧距'];
+                    data[r+4][cL] = d['左车轮径向跳动'];data[r+4][cR] = d['右车轮径向跳动'];
+                    data[r+5][cL] = d['左车轮轴向跳动'];data[r+5][cR] = d['右车轮轴向跳动'];
+                    data[r+6][cL] = d['左车轮Qr'];      data[r+6][cR] = d['右车轮Qr'];
+                    ok++;
+                    logMessage(`成功处理：${f.name}`);
+                } catch (e) {
+                    errCount++;
+                    logMessage(`处理失败：${f.name} → ${e.message}`);
+                }
+            }
+
+            // 填充车厢号，去重排序
+            const carStr = Array.from(cars).filter(Boolean).sort().join(',');
+            if (carStr) {
+                data[2][0] = carStr;
+                data[18][0] = carStr;
+            }
+
+            // 创建工作表，设置样式
+            const ws = XLSX.utils.aoa_to_sheet(data);
+
+            // ====================== 严格复刻Python样式代码 ======================
+            // 1. 第2~33行（JS对应1~32行）全部细线边框
+            for (let R = 1; R <= 32; R++) {
+                for (let C = 0; C <= 9; C++) {
+                    const addr = XLSX.utils.encode_cell({r:R, c:C});
+                    if (!ws[addr]) ws[addr] = {v: ''};
+                    ws[addr].s = {
+                        border: {
+                            top: { style: 'thin', color: { rgb: '000000' } },
+                            bottom: { style: 'thin', color: { rgb: '000000' } },
+                            left: { style: 'thin', color: { rgb: '000000' } },
+                            right: { style: 'thin', color: { rgb: '000000' } }
+                        },
+                        alignment: { horizontal: 'center', vertical: 'center' }
+                    };
+                }
+            }
+
+            // 2. 第1行（JS r=0）：黑体14号 加粗 居中
+            for (let C = 0; C <= 9; C++) {
+                const addr = XLSX.utils.encode_cell({r:0, c:C});
+                if (!ws[addr]) ws[addr] = {v: ''};
+                ws[addr].s = {
+                    font: { name: '黑体', sz: 14, bold: true },
+                    alignment: { horizontal: 'center', vertical: 'center' },
+                    border: {
+                        top: { style: 'thin', color: { rgb: '000000' } },
+                        bottom: { style: 'thin', color: { rgb: '000000' } },
+                        left: { style: 'thin', color: { rgb: '000000' } },
+                        right: { style: 'thin', color: { rgb: '000000' } }
+                    }
+                };
+            }
+
+            // 3. 第2行（JS r=1）：黑体11号 加粗 居中
+            for (let C = 0; C <= 9; C++) {
+                const addr = XLSX.utils.encode_cell({r:1, c:C});
+                ws[addr].s.font = { name: '黑体', sz: 11, bold: true };
+            }
+
+            // 4. 第3行（JS r=2）：黑体10号 加粗 居中
+            for (let C = 0; C <= 9; C++) {
+                const addr = XLSX.utils.encode_cell({r:2, c:C});
+                ws[addr].s.font = { name: '黑体', sz: 10, bold: true };
+            }
+
+            // 5. 第18行（JS r=17）：黑体10号 加粗 居中
+            for (let C = 0; C <= 9; C++) {
+                const addr = XLSX.utils.encode_cell({r:17, c:C});
+                ws[addr].s.font = { name: '黑体', sz: 10, bold: true };
+            }
+
+            // 6. 第19行（JS r=18）：黑体10号 加粗 居中
+            for (let C = 0; C <= 9; C++) {
+                const addr = XLSX.utils.encode_cell({r:18, c:C});
+                ws[addr].s.font = { name: '黑体', sz: 10, bold: true };
+            }
+
+            // 7. 第4~17行、20~33行：黑体10号 不加粗 居中
+            const normalRows = [];
+            for(let i=3; i<=16; i++) normalRows.push(i);
+            for(let i=19; i<=32; i++) normalRows.push(i);
+            for(let R of normalRows) {
+                for(let C=0; C<=9; C++) {
+                    const addr = XLSX.utils.encode_cell({r:R, c:C});
+                    ws[addr].s.font = { name: '黑体', sz: 10, bold: false };
+                }
+            }
+            // ====================== 样式设置完毕 ======================
+
+            // 合并单元格（和Python版本完全一致）
+            ws['!merges'] = [
+                {s:{r:0,c:0},e:{r:0,c:9}},    // 标题A1:J1
+                {s:{r:3,c:0},e:{r:9,c:0}},    // 1车A4:A10
+                {s:{r:10,c:0},e:{r:16,c:0}},  // 2车A11:A17
+                {s:{r:19,c:0},e:{r:25,c:0}},  // 3车A20:A26
+                {s:{r:26,c:0},e:{r:32,c:0}}   // 4车A27:A33
+            ];
+
+            // 列宽（复刻Python版本）
+            ws['!cols'] = [
+                {wch:8}, {wch:20}, {wch:12},
+                {wch:13}, {wch:13}, {wch:13},
+                {wch:13}, {wch:13}, {wch:13},
+                {wch:13}
+            ];
+
+            // 修复：使用兼容的导出方法，确保浏览器能下载
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "记录表");
+            // 生成时间戳文件名，避免重复
+            const now = new Date();
+            const fileName = `轮对测量_${now.getFullYear()}${(now.getMonth()+1).toString().padStart(2,'0')}${now.getDate().toString().padStart(2,'0')}_${now.getHours().toString().padStart(2,'0')}${now.getMinutes().toString().padStart(2,'0')}${now.getSeconds().toString().padStart(2,'0')}.xlsx`;
+            
+            // 核心修复：强制触发浏览器下载
+            XLSX.writeFile(wb, fileName, { bookType: 'xlsx', type: 'blob' });
+            logMessage(`✅ 导出成功：${fileName}`);
+            alert(`转换完成！\n✅ 成功：${ok} 个\n❌ 失败：${errCount} 个\n文件已自动下载`);
+        }
+
+        // 事件监听
+        fileInputEl.addEventListener('change', e => {
+            Array.from(e.target.files).forEach(f => {
+                if (!csvFiles.some(x => x.name === f.name && x.size === f.size)) {
+                    csvFiles.push(f);
+                }
+            });
+            updateFileList();
+        });
+
+        clearBtnEl.addEventListener('click', () => {
+            csvFiles.length = 0;
+            fileInputEl.value = '';
+            updateFileList();
+            logContentEl.textContent = '';
+            logMessage("已清空文件列表和日志");
+        });
+
+        convertBtnEl.addEventListener('click', async () => {
+            if (csvFiles.length === 0) {
+                alert("请先选择需要转换的CSV文件！");
+                return;
+            }
+            // 禁用按钮，显示进度条
+            convertBtnEl.disabled = true;
+            clearBtnEl.disabled = true;
+            progressBarEl.classList.add('active');
+            logContentEl.textContent = '';
+            logMessage(`🚀 开始批量转换，共${csvFiles.length}个文件`);
+
+            try {
+                await convertFiles();
+            } catch (globalErr) {
+                logMessage(`💥 全局异常：${globalErr.message}`);
+                alert(`转换出错：${globalErr.message}`);
+            } finally {
+                // 恢复按钮，隐藏进度条
+                convertBtnEl.disabled = false;
+                clearBtnEl.disabled = false;
+                progressBarEl.classList.remove('active');
+            }
+        });
+
+        // 初始化
+        updateFileList();
+    </script>
+</body>
+</html>
