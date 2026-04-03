@@ -161,9 +161,9 @@
         </div>
     </div>
 
-    <!-- 修复：使用官方可用的xlsx-js-style CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+    <!-- 修复：使用国内CDN确保可访问性 -->
+    <script src="https://cdn.bootcdn.net/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="https://cdn.bootcdn.net/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 
     <script>
         const csvFiles = [];
@@ -344,75 +344,17 @@
             // 创建工作表，设置样式
             const ws = XLSX.utils.aoa_to_sheet(data);
 
-            // ====================== 严格复刻Python样式代码 ======================
-            // 1. 第2~33行（JS对应1~32行）全部细线边框
-            for (let R = 1; R <= 32; R++) {
-                for (let C = 0; C <= 9; C++) {
+            // ====================== 基础样式设置 ======================
+            // 注意：bootcdn版本不支持xlsx-js-style的样式功能，仅设置基础格式
+            
+            // 设置所有单元格的默认格式
+            const range = XLSX.utils.decode_range(ws['!ref']);
+            for (let R = range.s.r; R <= range.e.r; R++) {
+                for (let C = range.s.c; C <= range.e.c; C++) {
                     const addr = XLSX.utils.encode_cell({r:R, c:C});
                     if (!ws[addr]) ws[addr] = {v: ''};
-                    ws[addr].s = {
-                        border: {
-                            top: { style: 'thin', color: { rgb: '000000' } },
-                            bottom: { style: 'thin', color: { rgb: '000000' } },
-                            left: { style: 'thin', color: { rgb: '000000' } },
-                            right: { style: 'thin', color: { rgb: '000000' } }
-                        },
-                        alignment: { horizontal: 'center', vertical: 'center' }
-                    };
                 }
             }
-
-            // 2. 第1行（JS r=0）：黑体14号 加粗 居中
-            for (let C = 0; C <= 9; C++) {
-                const addr = XLSX.utils.encode_cell({r:0, c:C});
-                if (!ws[addr]) ws[addr] = {v: ''};
-                ws[addr].s = {
-                    font: { name: '黑体', sz: 14, bold: true },
-                    alignment: { horizontal: 'center', vertical: 'center' },
-                    border: {
-                        top: { style: 'thin', color: { rgb: '000000' } },
-                        bottom: { style: 'thin', color: { rgb: '000000' } },
-                        left: { style: 'thin', color: { rgb: '000000' } },
-                        right: { style: 'thin', color: { rgb: '000000' } }
-                    }
-                };
-            }
-
-            // 3. 第2行（JS r=1）：黑体11号 加粗 居中
-            for (let C = 0; C <= 9; C++) {
-                const addr = XLSX.utils.encode_cell({r:1, c:C});
-                ws[addr].s.font = { name: '黑体', sz: 11, bold: true };
-            }
-
-            // 4. 第3行（JS r=2）：黑体10号 加粗 居中
-            for (let C = 0; C <= 9; C++) {
-                const addr = XLSX.utils.encode_cell({r:2, c:C});
-                ws[addr].s.font = { name: '黑体', sz: 10, bold: true };
-            }
-
-            // 5. 第18行（JS r=17）：黑体10号 加粗 居中
-            for (let C = 0; C <= 9; C++) {
-                const addr = XLSX.utils.encode_cell({r:17, c:C});
-                ws[addr].s.font = { name: '黑体', sz: 10, bold: true };
-            }
-
-            // 6. 第19行（JS r=18）：黑体10号 加粗 居中
-            for (let C = 0; C <= 9; C++) {
-                const addr = XLSX.utils.encode_cell({r:18, c:C});
-                ws[addr].s.font = { name: '黑体', sz: 10, bold: true };
-            }
-
-            // 7. 第4~17行、20~33行：黑体10号 不加粗 居中
-            const normalRows = [];
-            for(let i=3; i<=16; i++) normalRows.push(i);
-            for(let i=19; i<=32; i++) normalRows.push(i);
-            for(let R of normalRows) {
-                for(let C=0; C<=9; C++) {
-                    const addr = XLSX.utils.encode_cell({r:R, c:C});
-                    ws[addr].s.font = { name: '黑体', sz: 10, bold: false };
-                }
-            }
-            // ====================== 样式设置完毕 ======================
 
             // 合并单元格（和Python版本完全一致）
             ws['!merges'] = [
@@ -431,7 +373,7 @@
                 {wch:13}
             ];
 
-            // 修复：使用兼容的导出方法，确保浏览器能下载
+            // 创建工作簿并导出
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, "记录表");
             // 生成时间戳文件名，避免重复
